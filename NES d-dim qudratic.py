@@ -1,10 +1,42 @@
 import jax.numpy as jnp
 import jax.random as random
-from jax import vmap
+from jax import vmap, grad
+import jax
 import numpy as np
 from scipy.stats import mannwhitneyu
+import optax
+import time
+import pandas as pd
+# Define the Rosenbrock function
 def rosenbrock(x):
     return jnp.sum(100 * (x[1:] - x[:-1]**2)**2 + (1 - x[:-1])**2)
+
+class ADAM:
+    def __init__(self, objective, dim, generations, learning_rate=0.001):
+        self.learning_rate = learning_rate
+        self.generations = generations
+        self.optimizer = optax.adam(learning_rate)
+        self.objective = objective
+        self.params = jnp.zeros(dim)
+        self.opt_state = self.optimizer.init(self.params)
+    
+    # Step function with JIT compilation applied directly
+    def step(self, params, opt_state):
+        grads = grad(self.objective)(params)
+        updates, opt_state = self.optimizer.update(grads, opt_state)
+        params = optax.apply_updates(params, updates)
+        return params, opt_state
+
+    # Apply JIT as a function decorator
+    jitted_step = jax.jit(step, static_argnames=['self'])
+
+    def train(self):
+        for _ in range(self.generations):
+            self.params, self.opt_state = self.jitted_step(self.params, self.opt_state)
+        return self.params
+
+        
+    
 class NES:
     def __init__(self, dim, population_size, learning_rate, sigma, rng_key):
 
@@ -30,8 +62,7 @@ class NES:
             
             # Vectorized fitness evaluation of samples
             fitness_values = vmap(self.fitness_function)(samples)
-            #utilities = self.utility_norm(fitness_values)
-    
+            #utilities = self.utility(fitness_values)
             # Log-derivatives
             log_derivatives = (samples - self.theta) / (self.sigma**2)
 
@@ -47,11 +78,11 @@ class NES:
             self.theta += self.learning_rate * natural_gradient
             self.sigma *= self.decay_rate
             
-            if generation % 100 == 0:
+            '''if generation % 100 == 0:
                 formatted_theta = [f"{x:.3f}" for x in self.theta]  # Format each element to 3 decimal places
                 print('iter %d, lr %.3f,  w: [%s], reward: %.5f, mean reward: %.5f' % 
                 (generation, self.learning_rate, ", ".join(formatted_theta), self.fitness_function(self.theta), jnp.mean(fitness_values)))
-
+            '''
 
             if self.fitness_function(self.theta) > best_fitness:
                 best_solution = self.theta
@@ -73,8 +104,9 @@ class NES:
     # Disregard utility function for now
     '''def utility(self, fitness_values):
     # Rank transformation: best fitness gets rank 1, worst gets rank `population_size`
-        ranks = jnp.argsort(-fitness_values) + 1
-
+        ranks = jnp.argsort(-fitness_values)
+        ranks += 1
+        
         # Constant value for log term
         log_half_lambda_plus_one = jnp.log(self.population_size / 2 + 1)
 
@@ -85,11 +117,9 @@ class NES:
         # Numerator for each utility based on rank
         utilities_numerator = jnp.array([utility_value(rank) for rank in ranks])
 
-        # Denominator to normalize utilities
-        denominator = jnp.sum(jnp.array([utility_value(rank) for rank in range(1, self.population_size + 1)]))
-
         # Final utility values
-        utilities = utilities_numerator / denominator - 1 / self.population_size
+        utilities = utilities_numerator / jnp.sum(utilities_numerator) - 1 / self.population_size
+
         return utilities
     
     def utility_norm(self, fitness_values):
@@ -117,7 +147,7 @@ class NES:
 
         # Check if fitness values contain NaNs
         if jnp.isnan(fitness_values_prime).any():
-            print("Warning: NaN detected with eta_prime. Reverting learning rate to initial value.")
+            #print("Warning: NaN detected with eta_prime. Reverting learning rate to initial value.")
             self.learning_rate = self.learning_rate_initial  # Revert to safe initial value
             return
 
@@ -141,17 +171,120 @@ if __name__ == "__main__":
     key = np.random.randint(0, 1000)
     rng_key = random.PRNGKey(key)
     
-    # Set the dimension to 10 for a 10-dimensional Rosenbrock function
-    dim = 3
     population_size = 50
     learning_rate = 0.001
     sigma = 0.1
+    num_generations = 100
+    quadratic = lambda x: jnp.sum(x**2)
+    
+    # Set the dimension to 10 for a 10-dimensional Rosenbrock function
+    #Run test for increasing dimensions and generations
+    dimensions = [1, 5, 10, 25, 50]
+    generations = [10, 100, 1000, 10000]
+    errors_nes = []
+    errors_adam = []
+    times_nes = []
+    times_adam = []
 
-    # Initialize NES with 10 dimensions and train with Rosenbrock function
-    nes = NES(dim=dim, population_size=population_size, learning_rate=learning_rate, sigma=sigma, rng_key=rng_key)
+    for dim in dimensions:
+        for gen in generations:
+            nes = NES(dim=dim, population_size=population_size, learning_rate=learning_rate, sigma=sigma, rng_key=rng_key)
+            adam = ADAM(objective = quadratic, dim=dim, generations=gen)
+            start_time = time.time()
+            optimal_theta_nes = nes.train(num_generations=gen)
+            times_nes.append(time.time() - start_time)
+            optimal_theta_nes_error = nes.fitness_function(optimal_theta_nes)
+            errors_nes.append(optimal_theta_nes_error)
+            
+            start_time = time.time()
+            optimal_theta_adam = adam.train() 
+            times_adam.append(time.time() - start_time)
+            optimal_theta_adam_error = adam.objective(optimal_theta_adam)
+            errors_adam.append(optimal_theta_adam_error)
+
+            
+
+    #Plot the results
+    import matplotlib.pyplot as plt
+    import matplotlib.cm as cm
+    print("NES errors: ", np.array(errors_nes))
+    print("ADAM errors: ", np.array(errors_adam))
+    #errors_nes = [0.5, 0.3, 0.25, 0.45, 0.35, 0.28, 0.6, 0.4, 0.35]  # NES errors
+    #errors_adam = [0.48, 0.33, 0.29, 0.50, 0.36, 0.3, 0.55, 0.42, 0.34]  # ADAM errors
+
+    # Color map for unique combinations
+    cmap_nes = plt.get_cmap("Blues", len(dimensions) * len(generations))
+    cmap_adam = plt.get_cmap("Oranges", len(dimensions) * len(generations))
     
-    # Set `quad=False` to use the Rosenbrock function instead of the quadratic function
-    nes.fitness_function = lambda x, quad=False: -rosenbrock(x)
+    # Plot 1: Error vs Dimension for each generation
+    plt.figure(figsize=(10, 6))
+
+    # Plot NES error
+    for i, gen in enumerate(generations):
+        color = cmap_nes(i)
+        plt.plot(dimensions, errors_nes[i::len(generations)], label=f'NesES - Dim {gen}', marker='o')#, color=color)
+     
+
+    # Plot ADAM error
+    for i, gen in enumerate(generations):
+        color = cmap_adam(i)
+        plt.plot(dimensions, errors_adam[i::len(generations)], label=f'ADAM - Dim {gen}', marker='s')#, color=color)
     
-    optimal_theta = nes.train(num_generations=2000)
-    print('Optimal solution:', optimal_theta)
+    # Add labels and legend
+    plt.xlabel('Dimension')
+    plt.ylabel('Error')
+    plt.title('Error vs Dimension for NES and ADAM with Generation Coloring')
+    plt.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize='small')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    # Plot 2: Error vs Generations for each dimension
+    
+    plt.figure(figsize=(10, 6))
+
+    # Plot NES times
+    for i, dim in enumerate(dimensions):
+        color = cmap_nes(i)
+        plt.plot(generations, errors_nes[i::len(dimensions)], label=f'NesES - Dim {dim}', marker='o')#, color=color)
+     
+
+    # Plot ADAM times
+    for i, dim in enumerate(dimensions):
+        color = cmap_adam(i)
+        plt.plot(generations, errors_adam[i::len(dimensions)], label=f'ADAM - Dim {dim}', marker='s')#, color=color)
+
+    # Add labels, title, and legend
+    plt.xlabel('Generations')
+    plt.ylabel('Error')
+    plt.title('Error vs Generations for NES and ADAM across Dimensions')
+    plt.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize='small')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    #Plot 3 the time taken for each algorithm
+    plt.figure(figsize=(10, 6))
+
+    # Plot NES times
+    for i, dim in enumerate(dimensions):
+        color = cmap_nes(i)
+        plt.plot(generations, times_nes[i::len(dimensions)], label=f'NesES - Dim {dim}', marker='o')#, color=color)
+     
+
+    # Plot ADAM times
+    for i, dim in enumerate(dimensions):
+        color = cmap_adam(i)
+        plt.plot(generations, times_adam[i::len(dimensions)], label=f'ADAM - Dim {dim}', marker='s')#, color=color)
+
+    # Add labels and legend
+    plt.xlabel('Generation')
+    plt.ylabel('Time')
+    plt.title('Time vs Generation for NES and ADAM with Generation Coloring')
+    plt.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize='small')
+    plt.grid(True)
+    plt.yscale('log')
+    plt.tight_layout()
+    plt.show()
+    
+    
