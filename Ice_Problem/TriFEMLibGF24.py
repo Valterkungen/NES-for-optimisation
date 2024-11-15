@@ -1,5 +1,4 @@
 #================================================================= 
-# AE2220-II: Computational Modelling 
 # TriFEMLib: A number of classes to assist in implementing
 # finite-element methods on meshes of triangles
 #================================================================= 
