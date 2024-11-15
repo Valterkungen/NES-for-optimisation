@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"name": "nes_generations",
+			"path": "."
+		},
+		{
+			"name": "NES-for-optimisation",
+			"path": "../../../Bsc3/NES-for-optimisation"
+		},
+		{
+			"name": "nes_results",
+			"path": "../nes_results"
+		}
+	],
+	"settings": {}
+}
