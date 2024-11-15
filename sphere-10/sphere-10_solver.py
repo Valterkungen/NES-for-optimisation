@@ -113,125 +113,208 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 import jax.random as random
-from jax import vmap
+from jax import grad, vmap
 import matplotlib.pyplot as plt
-import pandas as pd
 import time
 from datetime import datetime
+import pandas as pd
 
-# Your existing NES class and fitness_function remain the same
+# Sphere function for both optimizers
+def sphere_function(x):
+    return jnp.sum(x**2)
 
-def run_experiments():
-    # Experiment parameters
-    dimensions = [2, 5, 10, 25]
-    population_sizes = [50, 500]
-    max_generations = 10000
-    learning_rate = 0.01
-    sigma = 0.1
+# Gradient-based optimizer
+class GradientDescent:
+    def __init__(self, dim, learning_rate=0.01, rng_key=None):
+        self.dim = dim
+        self.learning_rate = learning_rate
+        if rng_key is None:
+            rng_key = random.PRNGKey(42)
+        self.rng_key = rng_key
+        
+        # Initialize starting point randomly
+        self.theta = random.normal(self.rng_key, (dim,))
+        
+        # Get gradient function
+        self.grad_fn = grad(sphere_function)
     
-    # Store results for each configuration
+    def optimize(self, max_iterations, error_tol=1e-6):
+        errors = []
+        objective_values = []
+        
+        for iteration in range(max_iterations):
+            # Calculate gradient
+            gradient = self.grad_fn(self.theta)
+            
+            # Update parameters
+            self.theta -= self.learning_rate * gradient
+            
+            # Calculate error and objective
+            error = float(jnp.linalg.norm(self.theta))
+            obj_value = float(sphere_function(self.theta))
+            
+            errors.append(error)
+            objective_values.append(obj_value)
+            
+            if error < error_tol:
+                print(f"GD Converged at iteration {iteration} with error {error:.2e}")
+                break
+                
+            if iteration % 1000 == 0:
+                print(f"GD Iteration {iteration}: Error = {error:.2e}")
+        
+        return {
+            'solution': self.theta,
+            'errors': errors,
+            'objective_values': objective_values,
+            'iterations': iteration + 1
+        }
+
+def run_comparison():
+    # Parameters
+    dimensions = [2, 5, 10, 25]
+    max_iterations = 5000
     results_data = []
     
-    for pop_size in population_sizes:
-        for dim in dimensions:
-            print(f"\nRunning: Dimension {dim}, Population {pop_size}")
+    # NES parameters
+    nes_population_sizes = [50, 500]
+    nes_learning_rate = 0.01
+    nes_sigma = 0.1
+    
+    # GD parameters
+    gd_learning_rate = 0.01
+    
+    # Run experiments
+    for dim in dimensions:
+        print(f"\nRunning comparison for dimension {dim}")
+        
+        # Gradient Descent
+        print("Running Gradient Descent...")
+        gd = GradientDescent(dim=dim, learning_rate=gd_learning_rate)
+        start_time = time.time()
+        gd_results = gd.optimize(max_iterations)
+        gd_time = time.time() - start_time
+        
+        # Store GD results
+        results_data.append({
+            'method': 'GD',
+            'dimension': dim,
+            'population': 1,  # GD doesn't use population
+            'errors': gd_results['errors'],
+            'objective_values': gd_results['objective_values'],
+            'iterations': gd_results['iterations'],
+            'time': gd_time
+        })
+        
+        # NES for different population sizes
+        for pop_size in nes_population_sizes:
+            print(f"Running NES with population {pop_size}...")
+            nes = NES(dim=dim, population_size=pop_size, 
+                     learning_rate=nes_learning_rate, sigma=nes_sigma)
             
-            # Initialize NES
-            key = random.PRNGKey(42)  # Fixed seed for reproducibility
-            nes = NES(dim=dim, population_size=pop_size, learning_rate=learning_rate, 
-                     sigma=sigma, rng_key=key)
-            
-            # Run optimization
             start_time = time.time()
-            results = nes.optimize(max_generations=max_generations, 
-                                 track_convergence=True,
-                                 error_tol=1e-6)
+            nes_results = nes.optimize(max_iterations)
+            nes_time = time.time() - start_time
             
-            # Store results
-            run_data = {
+            results_data.append({
+                'method': f'NES (pop={pop_size})',
                 'dimension': dim,
                 'population': pop_size,
-                'errors': results['errors'],
-                'objective_values': results['convergence'],
-                'generations': len(results['errors']),
-                'time': time.time() - start_time
-            }
-            results_data.append(run_data)
-            
-            # Save to CSV
-            df = pd.DataFrame({
-                'generation': range(len(results['errors'])),
-                'relative_error': np.array(results['errors']) * 100,  # Convert to percentage
-                'objective_value': np.abs(results['convergence']),
-                'dimension': dim,
-                'population': pop_size
+                'errors': nes_results['errors'],
+                'objective_values': np.abs(nes_results['convergence']),
+                'iterations': len(nes_results['errors']),
+                'time': nes_time
             })
-            
-            # Save each run
-            df.to_csv(f'nes_results_dim{dim}_pop{pop_size}.csv', index=False)
-            
-            print(f"Completed in {run_data['time']:.2f} seconds")
-            print(f"Final error: {results['errors'][-1]:.2e}")
     
     return results_data
 
-def plot_results(results_data):
-    # Set up the figure with 2x2 subplots
+def plot_comparison(results_data):
     fig, axes = plt.subplots(2, 2, figsize=(15, 12))
     
     # Color mapping for dimensions
     colors = {2: 'black', 5: 'blue', 10: 'green', 25: 'cyan'}
+    # Line style mapping for methods
+    styles = {'GD': '-', 'NES (pop=50)': '--', 'NES (pop=500)': ':'}
     
-    # Plot for each population size
-    for pop_idx, pop_size in enumerate([50, 500]):
-        pop_results = [r for r in results_data if r['population'] == pop_size]
+    # Plot for each dimension
+    for dim in [2, 5, 10, 25]:
+        dim_results = [r for r in results_data if r['dimension'] == dim]
         
-        for result in pop_results:
-            dim = result['dimension']
+        for result in dim_results:
+            method = result['method']
             generations = np.arange(1, len(result['errors']) + 1)
             
-            # Plot relative error (top row)
-            axes[0, pop_idx].plot(generations, 
-                                np.array(result['errors']) * 100,  # Convert to percentage
-                                color=colors[dim],
-                                label=f'Dimension {dim}')
+            # Plot relative error (left)
+            axes[0, 0].plot(generations, 
+                          np.array(result['errors']) * 100,
+                          color=colors[dim],
+                          linestyle=styles[method],
+                          label=f'Dim {dim} - {method}')
             
-            # Plot objective value (bottom row)
-            axes[1, pop_idx].plot(generations,
-                                np.abs(result['objective_values']),
-                                color=colors[dim])
+            # Plot objective value (right)
+            axes[0, 1].plot(generations,
+                          result['objective_values'],
+                          color=colors[dim],
+                          linestyle=styles[method])
+            
+            # Plot computation time (bottom)
+            axes[1, 0].bar(f'{dim}D-{method}', 
+                         result['time'],
+                         label=method)
+            
+            # Plot iterations to convergence (bottom)
+            axes[1, 1].bar(f'{dim}D-{method}',
+                         result['iterations'])
     
     # Configure plots
-    for i in range(2):
-        for j in range(2):
-            axes[i, j].set_xscale('log')
-            axes[i, j].grid(True, which='both', linestyle='--', alpha=0.7)
-            axes[i, j].set_xlabel('Iterations (log scale)')
+    for ax in axes[0]:
+        ax.set_xscale('log')
+        ax.grid(True, which='both', linestyle='--', alpha=0.7)
+        ax.set_xlabel('Iterations (log scale)')
     
-    # Set specific settings for each row
-    for j in range(2):
-        # Relative error plots (top row)
-        axes[0, j].set_ylabel('Relative error (%)')
-        axes[0, j].set_title(f'Population = {[50, 500][j]}')
-        
-        # Objective value plots (bottom row)
-        axes[1, j].set_yscale('log')
-        axes[1, j].set_ylabel('Objective value (log scale)')
+    # Specific settings for each plot
+    axes[0, 0].set_ylabel('Relative error (%)')
+    axes[0, 0].set_title('Convergence - Relative Error')
+    axes[0, 0].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     
-    # Add legend to the first plot only
-    axes[0, 0].legend(title='Dimension')
+    axes[0, 1].set_yscale('log')
+    axes[0, 1].set_ylabel('Objective value (log scale)')
+    axes[0, 1].set_title('Convergence - Objective Value')
+    
+    axes[1, 0].set_ylabel('Time (seconds)')
+    axes[1, 0].set_title('Computation Time')
+    plt.setp(axes[1, 0].xaxis.get_majorticklabels(), rotation=45)
+    
+    axes[1, 1].set_ylabel('Iterations')
+    axes[1, 1].set_title('Iterations to Convergence')
+    plt.setp(axes[1, 1].xaxis.get_majorticklabels(), rotation=45)
     
     # Adjust layout and save
     plt.tight_layout()
-    plt.savefig(f'nes_results_{datetime.now().strftime("%Y%m%d_%H%M")}.png', dpi=300, bbox_inches='tight')
+    plt.savefig(f'optimization_comparison_{datetime.now().strftime("%Y%m%d_%H%M")}.png', 
+                dpi=300, bbox_inches='tight')
     plt.close()
 
 if __name__ == "__main__":
-    # Run experiments
-    print("Starting experiments...")
-    results = run_experiments()
+    # Run comparison
+    print("Starting comparison experiments...")
+    results = run_comparison()
+    
+    # Save results to CSV
+    df_results = pd.DataFrame([{
+        'method': r['method'],
+        'dimension': r['dimension'],
+        'population': r['population'],
+        'final_error': r['errors'][-1],
+        'final_objective': r['objective_values'][-1],
+        'iterations': r['iterations'],
+        'time': r['time']
+    } for r in results])
+    
+    df_results.to_csv(f'optimization_comparison_{datetime.now().strftime("%Y%m%d_%H%M")}.csv', 
+                      index=False)
     
     # Create plots
-    print("\nGenerating plots...")
-    plot_results(results)
+    print("\nGenerating comparison plots...")
+    plot_comparison(results)
     print("Done! Check the generated files for results.")
