@@ -7,7 +7,6 @@ import time
 import json
 import os
 
-
 # Define the Rosenbrock function
 def fitness_function(samples, rosenbrock=True):
     def rosenbrock(x):
@@ -37,6 +36,7 @@ class NES:
         errors = []
         
         for generation in range(max_generations):
+
             # Update RNG key and draw samples
             self.rng_key, subkey = random.split(self.rng_key)
             samples = self.theta + self.sigma * random.normal(subkey, (self.population_size, self.dim))
@@ -63,7 +63,7 @@ class NES:
                 best_solution = self.theta
                 best_fitness = current_fitness
             
-            # Track convergence and parameters if enabled
+            # Track convergence and parameters if enableda
             if track_convergence:
                 convergence.append(current_fitness)
             if track_parameters:
@@ -71,15 +71,7 @@ class NES:
             
             # Save the error    
             error = jnp.linalg.norm(jnp.ones(self.dim) - best_solution) / jnp.linalg.norm(jnp.ones(self.dim))
-        
-            if error < error_tol:
-                print("Error Converged at generation", generation)
-                break
-
-            ''''if generation % 1000 == 0:
-                print("Fitness error at generation", generation, jnp.abs(current_fitness - previous_fitness))
-                print("Error at generation", generation, jnp.sqrt(jnp.sum((jnp.ones(self.dim) - best_solution)**2)))'''        
-
+            errors.append(error)
 
         # Return results based on tracking options
         results = {'solution': best_solution, 'errors': errors, 'generation': generation}
@@ -111,30 +103,26 @@ if __name__ == "__main__":
     # Initialize RNG key for JAX random number generation
     key = np.random.randint(0, 1000)
     rng_key = random.PRNGKey(key)
-    
-    population_size = 50
-    learning_rate = 0.001
-    sigma = 0.1
-    dim = 5
-    num_generations = 50000
 
-    #nes = NES(dim=dim, population_size=population_size, learning_rate=learning_rate, sigma=sigma, rng_key=rng_key)
-    #nes.train(max_generations=num_generations)
-    
-
-    def sim():
+    def produce_results():
         # Initialize parameters
-        dimensions = [2, 5, 10, 25]
-        max_gen = 100001
-        population_size = [50, 500]
-        learning_rate = 0.01
-        sigma = 0.1
+        
+        benchmark_configuration = {
+            'dimensions': [2, 5, 10, 25],
+            'population_size': [50, 500],
+            'max_generations': 100001,
+            'learning_rate': 0.01,
+            'sigma': 0.1
+        }
+
         # Initialize a list to store each row of results data
         results_data = []
-
+        learning_rate = benchmark_configuration['learning_rate']
+        sigma = benchmark_configuration['sigma']
+        max_gen = benchmark_configuration['max_generations']
         # Loop through each dimension and population size
-        for dim in dimensions:
-            for pop in population_size:
+        for dim in benchmark_configuration['dimensions']:
+            for pop in benchmark_configuration['population_size']:
                 # Create NES instance with the current dimension and population size
                 nes = NES(dim=dim, population_size=pop, learning_rate=learning_rate, sigma=sigma, rng_key=rng_key)
                 
@@ -143,17 +131,17 @@ if __name__ == "__main__":
                 
                 # Train and capture convergence data
                 results = nes.optimize(max_generations=max_gen, track_convergence=True, track_parameters=True)
-                optimal_theta_nes = np.array(results['solution']).astype(float)  # Convert to float
-                convergence = np.array(results['convergence']).astype(float).tolist()  # Convert to list of float
-                errors = np.array(results['errors']).astype(float).tolist()            # Convert to list of float
-                parameter_history = np.array(results['parameters']).astype(float).tolist()  # Convert to list of float
-                generation = int(results['generation'])  # Ensure it's an integer
+                optimal_theta_nes = np.array(results['solution']).astype(float) 
+                convergence = np.array(results['convergence']).astype(float).tolist()  
+                errors = np.array(results['errors']).astype(float).tolist()            
+                parameter_history = np.array(results['parameters']).astype(float).tolist() 
+                generation = int(results['generation']) 
                 
                 # Calculate the error for optimal theta
-                optimal_theta_nes_error = float(np.sqrt(np.sum((np.ones(dim) - optimal_theta_nes)**2)))  # Convert to float
+                optimal_theta_nes_error = float(np.sqrt(np.sum((np.ones(dim) - optimal_theta_nes)**2)))  
                 time_taken = float(time.time() - start_time)
                 
-                # Append a dictionary with the current results to results_data
+                
                 results_data.append({
                     'Population': pop,
                     'Dimension': dim,
@@ -170,12 +158,10 @@ if __name__ == "__main__":
         current_directory = os.path.dirname(os.path.abspath(__file__))
         filename = "nes_results_dense_100k.json"
 
-        # Save the JSON file in the same directory as the script
         with open(os.path.join(current_directory, filename), "w") as f:
             json.dump(results_data, f, indent=4)
-
-        # Optional: print to verify structure
+    
         print(json.dumps(results_data, indent=4))
         
-    sim()
+    produce_results()
         
